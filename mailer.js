@@ -16,9 +16,9 @@ function getRandomElement(array) {
  * Função para enviar e-mails usando Nodemailer e Sendmail.
  * @param {Object} params - Parâmetros para envio do e-mail.
  * @param {string} [params.from] - Endereço de e-mail do remetente (opcional). Se não fornecido, será gerado automaticamente.
- * @param {string} params.name - Nome do remetente para exibição no campo "From".
- * @param {string} params.emailDomain - Domínio do e-mail para geração do remetente.
- * @param {string|string[]} params.to - Endereço(s) de e-mail do destinatário ou uma string vazia se usar BCC.
+ * @param {string} [params.name] - Nome do remetente para exibição no campo "From". Necessário se 'from' não for fornecido.
+ * @param {string} [params.emailDomain] - Domínio do e-mail para geração do remetente. Necessário se 'from' não for fornecido.
+ * @param {string|string[]} [params.to] - Endereço(s) de e-mail do destinatário ou uma string vazia se usar BCC.
  * @param {string} params.subject - Assunto do e-mail.
  * @param {string} params.text - Corpo do e-mail em texto.
  * @param {string} [params.html] - Corpo do e-mail em HTML (opcional).
@@ -28,17 +28,18 @@ function getRandomElement(array) {
  */
 async function sendEmail({ from, name, emailDomain, to, subject, text, html, bcc }) {
   try {
-    // Verifica se 'to' e 'subject' estão fornecidos
-    if (!to) {
-      throw new Error("O campo 'to' é obrigatório.");
-    }
+    // Validação de parâmetros
     if (!subject) {
       throw new Error("O campo 'subject' é obrigatório.");
     }
-    if (!name || !emailDomain) {
-      if (!from) {
-        throw new Error("É necessário fornecer 'from' ou ambos 'name' e 'emailDomain'.");
-      }
+    if (!text && !html) {
+      throw new Error("Pelo menos um dos campos 'text' ou 'html' deve ser fornecido.");
+    }
+    if (!from && (!name || !emailDomain)) {
+      throw new Error("É necessário fornecer 'from' ou ambos 'name' e 'emailDomain'.");
+    }
+    if (!to && !bcc) {
+      throw new Error("Pelo menos um dos campos 'to' ou 'bcc' deve ser fornecido.");
     }
 
     // Configuração do transporte usando sendmail (Postfix ou Sendmail)
@@ -59,11 +60,15 @@ async function sendEmail({ from, name, emailDomain, to, subject, text, html, bcc
     // Opções do e-mail
     const mailOptions = {
       from: fromEmail,
-      to: to, // Pode ser uma string ou array
       subject,
       text,
       html,
     };
+
+    // Adicionar 'to' se fornecido
+    if (to) {
+      mailOptions.to = to;
+    }
 
     // Adicionar BCC se fornecido
     if (bcc) {
