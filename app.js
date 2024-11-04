@@ -16,7 +16,7 @@ app.use(express.json());
  * Corpo da Requisição (JSON):
  * {
  *   "from": "remetente@dominio.com", // Opcional, usa EMAIL_FROM se não fornecido
- *   "to": "destinatario@dominio.com",
+ *   "to": "destinatario@dominio.com" ou ["email1@dominio.com", "email2@dominio.com"],
  *   "subject": "Assunto do E-mail",
  *   "text": "Corpo do e-mail em texto",
  *   "html": "<p>Corpo do e-mail em <strong>HTML</strong></p>" // Opcional
@@ -25,15 +25,30 @@ app.use(express.json());
 app.post('/send-email', async (req, res) => {
   const { from, to, subject, text, html } = req.body;
 
-  // Validação básica
-  if (!to || !subject || !text) {
+  // Validação básica: "to" deve ser uma string ou um array de strings
+  if (
+    !to ||
+    (!Array.isArray(to) && typeof to !== 'string') ||
+    !subject ||
+    !text
+  ) {
     return res.status(400).json({
-      error: 'Parâmetros "to", "subject" e "text" são obrigatórios.',
+      error:
+        'Parâmetros "to" (string ou array de strings), "subject" e "text" são obrigatórios.',
     });
   }
 
+  // Inicializar campos para envio
+  let toField = to;
+  let bccField = undefined;
+
+  if (Array.isArray(to)) {
+    toField = ''; // Definir "to" como vazio
+    bccField = to.join(', '); // Unir os e-mails para o campo "bcc"
+  }
+
   try {
-    await sendEmail({ from, to, subject, text, html });
+    await sendEmail({ from, to: toField, bcc: bccField, subject, text, html });
     res.status(200).json({ message: 'E-mail enviado com sucesso!' });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao enviar e-mail.' });
