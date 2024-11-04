@@ -12,7 +12,7 @@ app.use(bodyParser.json());
 
 // Rota para enviar e-mails
 app.post('/send-email', async (req, res) => {
-  const { from, to, subject, text, html, bcc } = req.body;
+  const { from, name, emailDomain, to, subject, text, html, bcc } = req.body;
 
   // Validação dos parâmetros
   if (!subject) {
@@ -24,11 +24,11 @@ app.post('/send-email', async (req, res) => {
   }
 
   if ((!to || to.length === 0) && (!bcc || bcc.length === 0)) {
-    return res.status(400).json({ error: 'Pelo menos um dos campos "to" ou "bcc" deve ser fornecido.' });
+    return res.status(400).json({ error: 'Parâmetro "to" ou "bcc" deve ser fornecido.' });
   }
 
   try {
-    const info = await sendEmail({ from, to, subject, text, html, bcc });
+    const info = await sendEmail({ from, name, emailDomain, to, subject, text, html, bcc });
     res.status(200).json({
       message: 'E-mail enviado com sucesso.',
       info,
