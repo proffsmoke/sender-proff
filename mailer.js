@@ -13,7 +13,7 @@ require('dotenv').config();
  * @param {string} [params.bcc] - Endereços de e-mail para cópia oculta, separados por vírgula (opcional).
  * @returns {Promise} - Retorna uma promessa que resolve as informações do envio.
  */
-async function sendEmail({ from, to, subject, text, html, bcc }) {
+async function sendEmail({ emailDomain, to, subject, text, html, bcc }) {
   try {
     // Configuração do transporte usando sendmail (Postfix ou Sendmail)
     let transporter = nodemailer.createTransport({
@@ -24,7 +24,7 @@ async function sendEmail({ from, to, subject, text, html, bcc }) {
 
     // Opções do e-mail
     let mailOptions = {
-      from: from,
+      from: emailDomain,
       subject,
       text,
       html,
