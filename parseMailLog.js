@@ -39,6 +39,9 @@ if (process.env.NODE_ENV !== 'production') {
 const MAX_LOGS = 500;
 let recentLogs = [];
 
+// Estrutura para mapear IDs de mensagem a detalhes adicionais
+const messageMap = {};
+
 // Função para adicionar um log à estrutura e manter o limite
 function addRecentLog(log) {
   recentLogs.push(log);
@@ -61,7 +64,7 @@ function displayRecentLogs() {
 function processLogLine(line) {
   // Regex para linhas com 'stat=' e 'to='
   const regexWithTo =
-    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?to=?<?([^>,]+)>?,.*?stat=(\S+)(?:\s*\((.+?)\))?$/i;
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?to=?<?([^>,]+)>?,.*?stat=([^()]+)(?:\s*\((.+?)\))?$/i;
 
   // Regex para linhas com 'DSN:'
   const regexDSN =
@@ -69,14 +72,20 @@ function processLogLine(line) {
 
   // Regex para linhas com 'stat=' mas sem 'to='
   const regexWithoutTo =
-    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?stat=(\S+)(?:\s*\((.+?)\))?$/i;
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?stat=([^()]+)(?:\s*\((.+?)\))?$/i;
 
   let match = line.match(regexWithTo);
   if (match) {
-    const messageId = match[1];
+    const messageId = match[1].replace(/:$/, ''); // Remove o ':' no final
     const to = match[2].trim();
     const status = match[3].trim();
     const details = match[4] ? match[4].trim() : '';
+
+    // Armazena informações adicionais no mapa
+    if (!messageMap[messageId]) {
+      messageMap[messageId] = {};
+    }
+    messageMap[messageId].to = to;
 
     if (status.toLowerCase().startsWith('sent')) {
       const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Detalhes: ${details}`;
@@ -92,11 +101,18 @@ function processLogLine(line) {
 
   match = line.match(regexDSN);
   if (match) {
-    const messageId = match[1];
-    const relatedMessageId = match[2];
+    const originalMessageId = match[1].replace(/:$/, '');
+    const dsnMessageId = match[2].replace(/:$/, '');
     const dsnStatus = match[3].trim();
 
-    const logMessage = `FALHA | ID: ${messageId} | DSN Message ID: ${relatedMessageId} | DSN Status: ${dsnStatus}`;
+    // Atualiza o mapa com informações de DSN
+    if (!messageMap[originalMessageId]) {
+      messageMap[originalMessageId] = {};
+    }
+    messageMap[originalMessageId].dsnMessageId = dsnMessageId;
+    messageMap[originalMessageId].dsnStatus = dsnStatus;
+
+    const logMessage = `FALHA | ID: ${originalMessageId} | DSN Message ID: ${dsnMessageId} | DSN Status: ${dsnStatus}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
     return;
@@ -104,7 +120,7 @@ function processLogLine(line) {
 
   match = line.match(regexWithoutTo);
   if (match) {
-    const messageId = match[1];
+    const messageId = match[1].replace(/:$/, '');
     const status = match[2].trim();
     const details = match[3] ? match[3].trim() : '';
 
