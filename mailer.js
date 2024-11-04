@@ -24,7 +24,7 @@ async function sendEmail({ from, to, subject, text, html, bcc }) {
 
     // Opções do e-mail
     let mailOptions = {
-      from: from || process.env.EMAIL_FROM || 'seu-email@dominio.com',
+      from: from,
       subject,
       text,
       html,
