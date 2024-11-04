@@ -30,7 +30,7 @@ async function sendEmail({ from, name, emailDomain, to, subject, text, html, bcc
       const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
       from = `"${name}" <${randomPrefix}@${emailDomain}>`;
     } else {
-      from = from || process.env.EMAIL_FROM || 'seu-email@dominio.com';
+      from = from;
     }
 
     // Opções do e-mail
