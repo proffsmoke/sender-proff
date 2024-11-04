@@ -39,7 +39,7 @@ if (process.env.NODE_ENV !== 'production') {
 const MAX_LOGS = 500;
 let recentLogs = [];
 
-// Estrutura para mapear IDs de mensagem a detalhes adicionais
+// Estrutura para mapear IDs de mensagem originais e DSN
 const messageMap = {};
 
 // Função para adicionar um log à estrutura e manter o limite
@@ -76,43 +76,60 @@ function processLogLine(line) {
 
   let match = line.match(regexWithTo);
   if (match) {
-    const messageId = match[1].replace(/:$/, ''); // Remove o ':' no final
+    const originalMessageId = match[1].replace(/:$/, ''); // Remove o ':' no final
     const to = match[2].trim();
     const status = match[3].trim();
     const details = match[4] ? match[4].trim() : '';
 
-    // Armazena informações adicionais no mapa
-    if (!messageMap[messageId]) {
-      messageMap[messageId] = {};
+    // Verifica se o ID é um DSNMessageId e encontra o originalMessageId
+    let finalMessageId = originalMessageId;
+    // Itera sobre messageMap para encontrar se originalMessageId é um DSN
+    for (const key in messageMap) {
+      if (messageMap[key].dsnMessageId === originalMessageId) {
+        finalMessageId = key;
+        break;
+      }
     }
-    messageMap[messageId].to = to;
+
+    // Inicializa o objeto no messageMap se não existir
+    if (!messageMap[finalMessageId]) {
+      messageMap[finalMessageId] = {};
+    }
+
+    // Atualiza informações no messageMap
+    messageMap[finalMessageId].to = to;
+    messageMap[finalMessageId].status = status;
+    messageMap[finalMessageId].details = details;
 
     if (status.toLowerCase().startsWith('sent')) {
-      const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Detalhes: ${details}`;
+      const logMessage = `SUCESSO | ID: ${finalMessageId} | Para: ${to} | Detalhes: ${details}`;
       logger.info(logMessage);
       addRecentLog(logMessage);
     } else {
-      const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
+      const logMessage = `FALHA | ID: ${finalMessageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
       logger.error(logMessage);
       addRecentLog(logMessage);
     }
+
     return;
   }
 
   match = line.match(regexDSN);
   if (match) {
-    const originalMessageId = match[1].replace(/:$/, '');
+    const messageId = match[1].replace(/:$/, '');
     const dsnMessageId = match[2].replace(/:$/, '');
     const dsnStatus = match[3].trim();
 
-    // Atualiza o mapa com informações de DSN
-    if (!messageMap[originalMessageId]) {
-      messageMap[originalMessageId] = {};
+    // Inicializa o objeto no messageMap se não existir
+    if (!messageMap[messageId]) {
+      messageMap[messageId] = {};
     }
-    messageMap[originalMessageId].dsnMessageId = dsnMessageId;
-    messageMap[originalMessageId].dsnStatus = dsnStatus;
 
-    const logMessage = `FALHA | ID: ${originalMessageId} | DSN Message ID: ${dsnMessageId} | DSN Status: ${dsnStatus}`;
+    // Atualiza informações de DSN no messageMap
+    messageMap[messageId].dsnMessageId = dsnMessageId;
+    messageMap[messageId].dsnStatus = dsnStatus;
+
+    const logMessage = `FALHA | ID: ${messageId} | DSN Message ID: ${dsnMessageId} | DSN Status: ${dsnStatus}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
     return;
@@ -124,9 +141,70 @@ function processLogLine(line) {
     const status = match[2].trim();
     const details = match[3] ? match[3].trim() : '';
 
-    const logMessage = `FALHA | ID: ${messageId} | Status: ${status} | Detalhes: ${details}`;
+    // Verifica se o ID é um DSNMessageId e encontra o originalMessageId
+    let finalMessageId = messageId;
+    for (const key in messageMap) {
+      if (messageMap[key].dsnMessageId === messageId) {
+        finalMessageId = key;
+        break;
+      }
+    }
+
+    // Inicializa o objeto no messageMap se não existir
+    if (!messageMap[finalMessageId]) {
+      messageMap[finalMessageId] = {};
+    }
+
+    // Atualiza informações no messageMap
+    messageMap[finalMessageId].status = status;
+    messageMap[finalMessageId].details = details;
+
+    const logMessage = `FALHA | ID: ${finalMessageId} | Status: ${status} | Detalhes: ${details}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
+    return;
+  }
+
+  // Regex para detectar 'Saved message' e finalizar o log
+  const regexSavedMessage = /(?:sendmail|sm-mta)\[\d+\]: (\S+): Saved message in .*$/i;
+  match = line.match(regexSavedMessage);
+  if (match) {
+    const messageId = match[1].replace(/:$/, '');
+
+    // Verifica se o messageId é um DSNMessageId e encontra o originalMessageId
+    let originalMessageId = messageId;
+    for (const key in messageMap) {
+      if (messageMap[key].dsnMessageId === messageId) {
+        originalMessageId = key;
+        break;
+      }
+    }
+
+    if (messageMap[originalMessageId]) {
+      const { to, status, details, dsnMessageId, dsnStatus } = messageMap[originalMessageId];
+
+      let logMessage = `FALHA | ID: ${originalMessageId}`;
+      if (dsnMessageId && dsnStatus) {
+        logMessage += ` | DSN Message ID: ${dsnMessageId} | DSN Status: ${dsnStatus}`;
+      }
+      if (to) {
+        logMessage += ` | Para: ${to}`;
+      }
+      if (status) {
+        logMessage += ` | Status: ${status}`;
+      }
+      if (details) {
+        logMessage += ` | Detalhes: ${details}`;
+      }
+
+      // Log final
+      logger.error(logMessage);
+      addRecentLog(logMessage);
+      displayRecentLogs();
+
+      // Remove a entrada do messageMap após o log
+      delete messageMap[originalMessageId];
+    }
     return;
   }
 
