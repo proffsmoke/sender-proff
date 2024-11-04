@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const chokidar = require('chokidar');
 const winston = require('winston');
+require('dotenv').config();
 
 // Configuração do Winston para logs detalhados e de erros
 const logger = winston.createLogger({
@@ -57,8 +57,8 @@ function processLogLine(line) {
   // Exemplo de linha de falha do Sendmail:
   // Nov  4 04:25:00 localhost sm-mta[11206]: 4A44Mbng011204: to=<destinatario@exemplo.com>, ... stat=Deferred: Connection timed out
 
-  const sentRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.*?)>,.*?stat=Sent\s*\((.+)\)/i;
-  const failedRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.*?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
+  const sentRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.+?)>,.*?stat=Sent\s*\((.+)\)/i;
+  const failedRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.+?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
 
   let match = line.match(sentRegex);
   if (match) {
@@ -98,17 +98,6 @@ if (!fs.existsSync(parsedLogsDir)) {
   fs.mkdirSync(parsedLogsDir);
 }
 
-// Inicializa o watcher usando chokidar
-const watcher = chokidar.watch(MAIL_LOG_PATH, {
-  persistent: true,
-  usePolling: true,
-  interval: 1000,
-  awaitWriteFinish: {
-    stabilityThreshold: 500,
-    pollInterval: 100
-  }
-});
-
 // Armazena a posição atual no arquivo para ler novas linhas apenas
 let filePosition = 0;
 
@@ -144,11 +133,6 @@ function readNewLines() {
   });
 }
 
-// Inicia a leitura quando o watcher detecta alterações
-watcher.on('change', () => {
-  readNewLines();
-});
-
 // Função para inicializar o monitoramento e carregar os logs existentes
 function initialize() {
   fs.readFile(MAIL_LOG_PATH, 'utf8', (err, data) => {
@@ -166,8 +150,17 @@ function initialize() {
   });
 }
 
+// Função principal que executa o loop de verificação a cada 10 segundos
+function mainLoop() {
+  readNewLines();
+}
+
 // Inicializa o monitoramento
 initialize();
+displayRecentLogs();
 
 console.log(`Monitorando o arquivo de log: ${MAIL_LOG_PATH}`);
 console.log(`Exibindo os últimos ${MAX_LOGS} logs no console.\n`);
+
+// Inicia o loop de verificação a cada 10 segundos
+setInterval(mainLoop, 10000);
