@@ -42,6 +42,14 @@ let recentLogs = [];
 // Estrutura para mapear IDs de mensagem originais e DSN
 const messageMap = {};
 
+// Estrutura para contagem de status
+const statusCounts = {
+  SUCESSO: 0,
+  FALHA: 0,
+  INDEFINIDO: 0,
+  // Adicione outros status conforme necessário
+};
+
 // Função para adicionar um log à estrutura e manter o limite
 function addRecentLog(log) {
   recentLogs.push(log);
@@ -50,14 +58,19 @@ function addRecentLog(log) {
   }
 }
 
-// Função para exibir os últimos 500 logs no console
-function displayRecentLogs() {
-  console.clear();
-  console.log(`\nÚltimos ${recentLogs.length} logs de e-mail:\n`);
-  recentLogs.forEach((log) => {
-    console.log(log);
-  });
-  console.log('\nAguardando novos logs...\n');
+// Função para exibir apenas um log no console
+function displayNewLog(log) {
+  console.log(log);
+}
+
+// Função para exibir as contagens de status
+function displayStatusCounts() {
+  console.log('\nContagem de Status de E-mail:');
+  console.log(`SUCESSO: ${statusCounts.SUCESSO}`);
+  console.log(`FALHA: ${statusCounts.FALHA}`);
+  console.log(`INDEFINIDO: ${statusCounts.INDEFINIDO}`);
+  // Adicione outras contagens conforme necessário
+  console.log('-------------------------------------------\n');
 }
 
 // Função para processar cada linha do mail.log
@@ -101,14 +114,26 @@ function processLogLine(line) {
     messageMap[finalMessageId].status = status;
     messageMap[finalMessageId].details = details;
 
+    let logMessage = '';
+    let statusKey = '';
+
     if (status.toLowerCase().startsWith('sent')) {
-      const logMessage = `SUCESSO | ID: ${finalMessageId} | Para: ${to} | Detalhes: ${details}`;
+      logMessage = `SUCESSO | ID: ${finalMessageId} | Para: ${to} | Detalhes: ${details}`;
+      statusKey = 'SUCESSO';
       logger.info(logMessage);
-      addRecentLog(logMessage);
     } else {
-      const logMessage = `FALHA | ID: ${finalMessageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
+      logMessage = `FALHA | ID: ${finalMessageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
+      statusKey = 'FALHA';
       logger.error(logMessage);
-      addRecentLog(logMessage);
+    }
+
+    addRecentLog(logMessage);
+    displayNewLog(logMessage);
+
+    // Atualiza contagens
+    if (statusKey) {
+      statusCounts[statusKey] += 1;
+      displayStatusCounts();
     }
 
     return;
@@ -132,6 +157,12 @@ function processLogLine(line) {
     const logMessage = `FALHA | ID: ${messageId} | DSN Message ID: ${dsnMessageId} | DSN Status: ${dsnStatus}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
+    displayNewLog(logMessage);
+
+    // Atualiza contagens
+    statusCounts['FALHA'] += 1;
+    displayStatusCounts();
+
     return;
   }
 
@@ -159,9 +190,28 @@ function processLogLine(line) {
     messageMap[finalMessageId].status = status;
     messageMap[finalMessageId].details = details;
 
-    const logMessage = `FALHA | ID: ${finalMessageId} | Status: ${status} | Detalhes: ${details}`;
-    logger.error(logMessage);
+    let logMessage = '';
+    let statusKey = '';
+
+    if (status.toLowerCase().startsWith('sent')) {
+      logMessage = `SUCESSO | ID: ${finalMessageId} | Status: ${status} | Detalhes: ${details}`;
+      statusKey = 'SUCESSO';
+      logger.info(logMessage);
+    } else {
+      logMessage = `FALHA | ID: ${finalMessageId} | Status: ${status} | Detalhes: ${details}`;
+      statusKey = 'FALHA';
+      logger.error(logMessage);
+    }
+
     addRecentLog(logMessage);
+    displayNewLog(logMessage);
+
+    // Atualiza contagens
+    if (statusKey) {
+      statusCounts[statusKey] += 1;
+      displayStatusCounts();
+    }
+
     return;
   }
 
@@ -200,7 +250,11 @@ function processLogLine(line) {
       // Log final
       logger.error(logMessage);
       addRecentLog(logMessage);
-      displayRecentLogs();
+      displayNewLog(logMessage);
+
+      // Atualiza contagens
+      statusCounts['FALHA'] += 1;
+      displayStatusCounts();
 
       // Remove a entrada do messageMap após o log
       delete messageMap[originalMessageId];
@@ -238,7 +292,8 @@ function initialize() {
   });
 
   rl.on('close', () => {
-    displayRecentLogs();
+    console.log('\nInicialização concluída. Aguardando novos logs...\n');
+    displayStatusCounts();
   });
 
   rl.on('error', (err) => {
@@ -290,3 +345,5 @@ monitorLog();
 
 console.log(`Monitorando o arquivo de log: ${MAIL_LOG_PATH}`);
 console.log(`Exibindo os últimos ${MAX_LOGS} logs no console.\n`);
+console.log('Contagem inicial de status de e-mail:');
+displayStatusCounts();
