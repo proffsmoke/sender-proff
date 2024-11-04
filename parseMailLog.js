@@ -26,11 +26,12 @@ const logger = winston.createLogger({
   ],
 });
 
-// Se não estiver em produção, também logar no console
+// Se não estiver em produção, também logar no console (ajustado para evitar duplicação)
 if (process.env.NODE_ENV !== 'production') {
   logger.add(
     new winston.transports.Console({
       format: winston.format.simple(),
+      level: 'info', // Logar apenas mensagens de nível 'info' no console
     })
   );
 }
@@ -280,8 +281,11 @@ if (!fs.existsSync(parsedLogsDir)) {
   fs.mkdirSync(parsedLogsDir);
 }
 
+// Variável para armazenar a posição atual no arquivo
+let filePosition = 0;
+
 // Função para inicializar o monitoramento e carregar os logs existentes
-function initialize() {
+function initialize(callback) {
   const rl = readline.createInterface({
     input: fs.createReadStream(MAIL_LOG_PATH),
     crlfDelay: Infinity,
@@ -294,6 +298,15 @@ function initialize() {
   rl.on('close', () => {
     console.log('\nInicialização concluída. Aguardando novos logs...\n');
     displayStatusCounts();
+    // Obter o tamanho atual do arquivo e ajustar a posição
+    fs.stat(MAIL_LOG_PATH, (err, stats) => {
+      if (err) {
+        console.error(`Erro ao obter o tamanho do arquivo: ${err.message}`);
+        process.exit(1);
+      }
+      filePosition = stats.size;
+      if (callback) callback();
+    });
   });
 
   rl.on('error', (err) => {
@@ -305,43 +318,58 @@ function initialize() {
 function monitorLog() {
   fs.watch(MAIL_LOG_PATH, (eventType, filename) => {
     if (eventType === 'change') {
-      const stream = fs.createReadStream(MAIL_LOG_PATH, { encoding: 'utf8', start: filePosition });
-      let remaining = '';
-
-      stream.on('data', (chunk) => {
-        remaining += chunk;
-        let index;
-        while ((index = remaining.indexOf('\n')) > -1) {
-          const line = remaining.substring(0, index);
-          remaining = remaining.substring(index + 1);
-          if (line.trim()) {
-            processLogLine(line);
-          }
+      fs.stat(MAIL_LOG_PATH, (err, stats) => {
+        if (err) {
+          logger.error(`Erro ao obter o tamanho do arquivo: ${err.message}`);
+          return;
         }
-      });
 
-      stream.on('end', () => {
-        filePosition += remaining.length;
-        if (remaining.trim()) {
-          processLogLine(remaining);
+        // Se o arquivo foi truncado (tamanho menor), redefina a posição
+        if (stats.size < filePosition) {
+          filePosition = 0;
         }
-      });
 
-      stream.on('error', (err) => {
-        logger.error(`Erro ao monitorar o arquivo de log: ${err.message}`);
+        if (stats.size > filePosition) {
+          const stream = fs.createReadStream(MAIL_LOG_PATH, {
+            encoding: 'utf8',
+            start: filePosition,
+            end: stats.size,
+          });
+          let remaining = '';
+
+          stream.on('data', (chunk) => {
+            remaining += chunk;
+            let index;
+            while ((index = remaining.indexOf('\n')) > -1) {
+              const line = remaining.substring(0, index);
+              remaining = remaining.substring(index + 1);
+              if (line.trim()) {
+                processLogLine(line);
+              }
+            }
+          });
+
+          stream.on('end', () => {
+            // Atualiza a posição atual no arquivo
+            filePosition = stats.size;
+            if (remaining.trim()) {
+              processLogLine(remaining);
+            }
+          });
+
+          stream.on('error', (err) => {
+            logger.error(`Erro ao monitorar o arquivo de log: ${err.message}`);
+          });
+        }
       });
     }
   });
 }
 
-// Variável para armazenar a posição atual no arquivo
-let filePosition = 0;
-
-// Inicializa o monitoramento
-initialize();
-
-// Inicia a monitoração do arquivo de log
-monitorLog();
+// Inicializa o monitoramento e, em seguida, começa a monitorar o arquivo
+initialize(() => {
+  monitorLog();
+});
 
 console.log(`Monitorando o arquivo de log: ${MAIL_LOG_PATH}`);
 console.log(`Exibindo os últimos ${MAX_LOGS} logs no console.\n`);
