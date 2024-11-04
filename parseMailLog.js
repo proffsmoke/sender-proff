@@ -1,7 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const winston = require('winston');
-require('dotenv').config();
+const dotenv = require('dotenv');
+const syslogParser = require('syslog-parser');
+
+// Carrega as variáveis de ambiente do arquivo .env
+dotenv.config();
 
 // Configuração do Winston para logs detalhados e de erros
 const logger = winston.createLogger({
@@ -17,6 +21,8 @@ const logger = winston.createLogger({
     new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'email_results.log') }),
     // Log de erros
     new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'email_errors.log'), level: 'error' }),
+    // Log de linhas não reconhecidas
+    new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'unparsed_lines.log'), level: 'warn' }),
   ],
 });
 
@@ -51,36 +57,52 @@ function displayRecentLogs() {
 
 // Função para processar cada linha do mail.log
 function processLogLine(line) {
-  // Exemplo de linha de sucesso do Sendmail:
-  // Nov  4 04:22:39 localhost sm-mta[11205]: 4A44Mbng011203: to=<destinatario@exemplo.com>, ... stat=Sent (<detalhes da mensagem>)
+  try {
+    // Utiliza o syslog-parser para estruturar a linha
+    const parsed = syslogParser.parse(line);
 
-  // Exemplo de linha de falha do Sendmail:
-  // Nov  4 04:25:00 localhost sm-mta[11206]: 4A44Mbng011204: to=<destinatario@exemplo.com>, ... stat=Deferred: Connection timed out
+    // Verifica se a mensagem é do sendmail ou sm-mta
+    if (parsed.program === 'sendmail' || parsed.program === 'sm-mta') {
+      // Exemplo de mensagem:
+      // 4A44Mbng011203: to=<destinatario@exemplo.com>, ... stat=Sent (<detalhes da mensagem>)
+      // 4A44Mbng011204: to=<destinatario@exemplo.com>, ... stat=Deferred: Connection timed out
 
-  const sentRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.+?)>,.*?stat=Sent\s*\((.+)\)/i;
-  const failedRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.+?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
+      const message = parsed.message;
 
-  let match = line.match(sentRegex);
-  if (match) {
-    const [_, messageId, to, response] = match;
-    const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Resposta: ${response}`;
-    logger.info(logMessage);
-    addRecentLog(logMessage);
-    displayRecentLogs();
-    return;
+      // Expressão regular para capturar mensagens de sucesso
+      const sentRegex = /(\S+): to=<(.+?)>,.*?stat=Sent\s*\((.+)\)/i;
+      // Expressão regular para capturar mensagens de falha
+      const failedRegex = /(\S+): to=<(.+?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
+
+      let match = message.match(sentRegex);
+      if (match) {
+        const [_, messageId, to, response] = match;
+        const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Resposta: ${response}`;
+        logger.info(logMessage);
+        addRecentLog(logMessage);
+        displayRecentLogs();
+        return;
+      }
+
+      match = message.match(failedRegex);
+      if (match) {
+        const [_, messageId, to, status, error] = match;
+        const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Erro: ${error}`;
+        logger.error(logMessage);
+        addRecentLog(logMessage);
+        displayRecentLogs();
+        return;
+      }
+
+      // Se a linha não corresponder a nenhum padrão conhecido
+      logger.warn(`Linha não reconhecida do sendmail: ${line}`);
+      return;
+    }
+
+    // Se a mensagem não for do sendmail ou sm-mta, ignorar ou processar conforme necessário
+  } catch (err) {
+    logger.error(`Erro ao processar a linha: ${err.message} | Linha: ${line}`);
   }
-
-  match = line.match(failedRegex);
-  if (match) {
-    const [_, messageId, to, status, error] = match;
-    const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Erro: ${error}`;
-    logger.error(logMessage);
-    addRecentLog(logMessage);
-    displayRecentLogs();
-    return;
-  }
-
-  // Caso a linha não corresponda aos padrões acima, ignorar ou processar conforme necessário
 }
 
 // Caminho para o arquivo mail.log (ajuste conforme necessário)
