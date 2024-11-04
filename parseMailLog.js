@@ -1,11 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const winston = require('winston');
-const dotenv = require('dotenv');
-const syslogParser = require('syslog-parser');
-
-// Carrega as variáveis de ambiente do arquivo .env
-dotenv.config();
+require('dotenv').config();
 
 // Configuração do Winston para logs detalhados e de erros
 const logger = winston.createLogger({
@@ -18,19 +14,24 @@ const logger = winston.createLogger({
   ),
   transports: [
     // Log de resultados concisos
-    new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'email_results.log') }),
+    new winston.transports.File({
+      filename: path.join(__dirname, 'parsed_logs', 'email_results.log'),
+    }),
     // Log de erros
-    new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'email_errors.log'), level: 'error' }),
-    // Log de linhas não reconhecidas
-    new winston.transports.File({ filename: path.join(__dirname, 'parsed_logs', 'unparsed_lines.log'), level: 'warn' }),
+    new winston.transports.File({
+      filename: path.join(__dirname, 'parsed_logs', 'email_errors.log'),
+      level: 'error',
+    }),
   ],
 });
 
 // Se não estiver em produção, também logar no console
 if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.simple(),
-  }));
+  logger.add(
+    new winston.transports.Console({
+      format: winston.format.simple(),
+    })
+  );
 }
 
 // Estrutura para armazenar os últimos 500 logs
@@ -49,7 +50,7 @@ function addRecentLog(log) {
 function displayRecentLogs() {
   console.clear();
   console.log(`\nÚltimos ${recentLogs.length} logs de e-mail:\n`);
-  recentLogs.forEach(log => {
+  recentLogs.forEach((log) => {
     console.log(log);
   });
   console.log('\nAguardando novos logs...\n');
@@ -57,74 +58,66 @@ function displayRecentLogs() {
 
 // Função para processar cada linha do mail.log
 function processLogLine(line) {
-  try {
-    // Utiliza o syslog-parser para estruturar a linha
-    const parsed = syslogParser.parse(line);
+  // Regex para linhas com 'stat=' e 'to='
+  const regexWithTo =
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?to=<([^>]+)>,.*?stat=(.*?)(?:\s*\((.+?)\))?$/i;
 
-    // Verifica se a mensagem é do sendmail ou sm-mta
-    if (parsed.program === 'sendmail' || parsed.program === 'sm-mta') {
-      const message = parsed.message;
-      const msgData = parseMessage(message);
+  // Regex para linhas com 'DSN:'
+  const regexDSN =
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): (\S+): DSN: (.*)$/i;
 
-      if (!msgData) {
-        logger.warn(`Linha não reconhecida do sendmail: ${line}`);
-        return;
-      }
+  // Regex para linhas com 'stat=' mas sem 'to='
+  const regexWithoutTo =
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?stat=(.*?)(?:\s*\((.+?)\))?$/i;
 
-      const { messageId, to, stat, dsn } = msgData;
-      if (!messageId || !to || !stat) {
-        logger.warn(`Linha incompleta do sendmail: ${line}`);
-        return;
-      }
+  let match = line.match(regexWithTo);
+  if (match) {
+    const messageId = match[1];
+    const to = match[2];
+    const status = match[3].trim();
+    const details = match[4] || '';
 
-      const recipient = to.replace(/^<|>$/g, ''); // Remove os sinais de menor e maior
-
-      if (stat.trim().toLowerCase().startsWith('sent')) {
-        // Mensagem enviada com sucesso
-        const responseMatch = stat.match(/Sent\s*(?:\((.*)\))?/i);
-        const response = responseMatch ? responseMatch[1] || '' : '';
-        const logMessage = `SUCESSO | ID: ${messageId} | Para: ${recipient} | Resposta: ${response} | DSN: ${dsn || 'N/A'}`;
-        logger.info(logMessage);
-        addRecentLog(logMessage);
-      } else {
-        // Mensagem com falha
-        const logMessage = `FALHA | ID: ${messageId} | Para: ${recipient} | Status: ${stat.trim()} | DSN: ${dsn || 'N/A'}`;
-        logger.error(logMessage);
-        addRecentLog(logMessage);
-      }
-
+    if (status.startsWith('Sent')) {
+      const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Detalhes: ${details}`;
+      logger.info(logMessage);
+      addRecentLog(logMessage);
       displayRecentLogs();
-      return;
-    }
-    // Se a mensagem não for do sendmail ou sm-mta, ignorar ou processar conforme necessário
-  } catch (err) {
-    logger.error(`Erro ao processar a linha: ${err.message} | Linha: ${line}`);
-  }
-}
-
-// Função para analisar a mensagem em pares chave=valor
-function parseMessage(message) {
-  const result = {};
-  const colonIndex = message.indexOf(':');
-  if (colonIndex === -1) {
-    return null;
-  }
-  result.messageId = message.substring(0, colonIndex).trim();
-  const rest = message.substring(colonIndex + 1).trim();
-  const parts = rest.split(/,\s*/);
-  for (const part of parts) {
-    const equalIndex = part.indexOf('=');
-    if (equalIndex !== -1) {
-      const key = part.substring(0, equalIndex).trim();
-      const value = part.substring(equalIndex + 1).trim();
-      result[key] = value;
     } else {
-      // Tratamento para partes sem sinal de igual
-      const [key, ...valueParts] = part.trim().split(/\s+/);
-      result[key] = valueParts.join(' ');
+      const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
+      logger.error(logMessage);
+      addRecentLog(logMessage);
+      displayRecentLogs();
     }
+    return;
   }
-  return result;
+
+  match = line.match(regexDSN);
+  if (match) {
+    const messageId = match[1];
+    const relatedMessageId = match[2];
+    const dsnStatus = match[3];
+
+    const logMessage = `FALHA | ID: ${messageId} | DSN Message ID: ${relatedMessageId} | DSN Status: ${dsnStatus}`;
+    logger.error(logMessage);
+    addRecentLog(logMessage);
+    displayRecentLogs();
+    return;
+  }
+
+  match = line.match(regexWithoutTo);
+  if (match) {
+    const messageId = match[1];
+    const status = match[2].trim();
+    const details = match[3] || '';
+
+    const logMessage = `FALHA | ID: ${messageId} | Status: ${status} | Detalhes: ${details}`;
+    logger.error(logMessage);
+    addRecentLog(logMessage);
+    displayRecentLogs();
+    return;
+  }
+
+  // Caso a linha não corresponda aos padrões acima, ignorar ou processar conforme necessário
 }
 
 // Caminho para o arquivo mail.log (ajuste conforme necessário)
@@ -149,7 +142,9 @@ let filePosition = 0;
 function readNewLines() {
   fs.stat(MAIL_LOG_PATH, (err, stats) => {
     if (err) {
-      logger.error(`Erro ao obter estatísticas do arquivo de log: ${err.message}`);
+      logger.error(
+        `Erro ao obter estatísticas do arquivo de log: ${err.message}`
+      );
       return;
     }
 
@@ -159,7 +154,10 @@ function readNewLines() {
     }
 
     if (stats.size > filePosition) {
-      const stream = fs.createReadStream(MAIL_LOG_PATH, { start: filePosition, end: stats.size });
+      const stream = fs.createReadStream(MAIL_LOG_PATH, {
+        start: filePosition,
+        end: stats.size,
+      });
       let buffer = '';
       stream.on('data', (data) => {
         buffer += data.toString();
@@ -167,7 +165,7 @@ function readNewLines() {
       stream.on('end', () => {
         filePosition = stats.size;
         const lines = buffer.split('\n');
-        lines.forEach(line => {
+        lines.forEach((line) => {
           if (line.trim()) {
             processLogLine(line);
           }
@@ -185,7 +183,7 @@ function initialize() {
       return;
     }
     const lines = data.split('\n');
-    lines.forEach(line => {
+    lines.forEach((line) => {
       if (line.trim()) {
         processLogLine(line);
       }
