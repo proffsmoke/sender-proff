@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const winston = require('winston');
+const readline = require('readline');
 require('dotenv').config();
 
 // Configuração do Winston para logs detalhados e de erros
@@ -60,7 +61,7 @@ function displayRecentLogs() {
 function processLogLine(line) {
   // Regex para linhas com 'stat=' e 'to='
   const regexWithTo =
-    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?to=<([^>]+)>,.*?stat=(.*?)(?:\s*\((.+?)\))?$/i;
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?to=?<?([^>,]+)>?,.*?stat=(\S+)(?:\s*\((.+?)\))?$/i;
 
   // Regex para linhas com 'DSN:'
   const regexDSN =
@@ -68,25 +69,23 @@ function processLogLine(line) {
 
   // Regex para linhas com 'stat=' mas sem 'to='
   const regexWithoutTo =
-    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?stat=(.*?)(?:\s*\((.+?)\))?$/i;
+    /(?:sendmail|sm-mta)\[\d+\]: (\S+): .*?stat=(\S+)(?:\s*\((.+?)\))?$/i;
 
   let match = line.match(regexWithTo);
   if (match) {
     const messageId = match[1];
-    const to = match[2];
+    const to = match[2].trim();
     const status = match[3].trim();
-    const details = match[4] || '';
+    const details = match[4] ? match[4].trim() : '';
 
-    if (status.startsWith('Sent')) {
+    if (status.toLowerCase().startsWith('sent')) {
       const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Detalhes: ${details}`;
       logger.info(logMessage);
       addRecentLog(logMessage);
-      displayRecentLogs();
     } else {
       const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Detalhes: ${details}`;
       logger.error(logMessage);
       addRecentLog(logMessage);
-      displayRecentLogs();
     }
     return;
   }
@@ -95,12 +94,11 @@ function processLogLine(line) {
   if (match) {
     const messageId = match[1];
     const relatedMessageId = match[2];
-    const dsnStatus = match[3];
+    const dsnStatus = match[3].trim();
 
     const logMessage = `FALHA | ID: ${messageId} | DSN Message ID: ${relatedMessageId} | DSN Status: ${dsnStatus}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
-    displayRecentLogs();
     return;
   }
 
@@ -108,12 +106,11 @@ function processLogLine(line) {
   if (match) {
     const messageId = match[1];
     const status = match[2].trim();
-    const details = match[3] || '';
+    const details = match[3] ? match[3].trim() : '';
 
     const logMessage = `FALHA | ID: ${messageId} | Status: ${status} | Detalhes: ${details}`;
     logger.error(logMessage);
     addRecentLog(logMessage);
-    displayRecentLogs();
     return;
   }
 
@@ -135,74 +132,67 @@ if (!fs.existsSync(parsedLogsDir)) {
   fs.mkdirSync(parsedLogsDir);
 }
 
-// Armazena a posição atual no arquivo para ler novas linhas apenas
-let filePosition = 0;
+// Função para inicializar o monitoramento e carregar os logs existentes
+function initialize() {
+  const rl = readline.createInterface({
+    input: fs.createReadStream(MAIL_LOG_PATH),
+    crlfDelay: Infinity,
+  });
 
-// Função para ler novas linhas adicionadas ao arquivo
-function readNewLines() {
-  fs.stat(MAIL_LOG_PATH, (err, stats) => {
-    if (err) {
-      logger.error(
-        `Erro ao obter estatísticas do arquivo de log: ${err.message}`
-      );
-      return;
-    }
+  rl.on('line', (line) => {
+    processLogLine(line);
+  });
 
-    if (stats.size < filePosition) {
-      // O arquivo foi truncado, resetar a posição
-      filePosition = 0;
-    }
+  rl.on('close', () => {
+    displayRecentLogs();
+  });
 
-    if (stats.size > filePosition) {
-      const stream = fs.createReadStream(MAIL_LOG_PATH, {
-        start: filePosition,
-        end: stats.size,
-      });
-      let buffer = '';
-      stream.on('data', (data) => {
-        buffer += data.toString();
-      });
-      stream.on('end', () => {
-        filePosition = stats.size;
-        const lines = buffer.split('\n');
-        lines.forEach((line) => {
+  rl.on('error', (err) => {
+    logger.error(`Erro ao ler o arquivo de log: ${err.message}`);
+  });
+}
+
+// Função para monitorar o arquivo de log em tempo real
+function monitorLog() {
+  fs.watch(MAIL_LOG_PATH, (eventType, filename) => {
+    if (eventType === 'change') {
+      const stream = fs.createReadStream(MAIL_LOG_PATH, { encoding: 'utf8', start: filePosition });
+      let remaining = '';
+
+      stream.on('data', (chunk) => {
+        remaining += chunk;
+        let index;
+        while ((index = remaining.indexOf('\n')) > -1) {
+          const line = remaining.substring(0, index);
+          remaining = remaining.substring(index + 1);
           if (line.trim()) {
             processLogLine(line);
           }
-        });
+        }
+      });
+
+      stream.on('end', () => {
+        filePosition += remaining.length;
+        if (remaining.trim()) {
+          processLogLine(remaining);
+        }
+      });
+
+      stream.on('error', (err) => {
+        logger.error(`Erro ao monitorar o arquivo de log: ${err.message}`);
       });
     }
   });
 }
 
-// Função para inicializar o monitoramento e carregar os logs existentes
-function initialize() {
-  fs.readFile(MAIL_LOG_PATH, 'utf8', (err, data) => {
-    if (err) {
-      logger.error(`Erro ao ler o arquivo de log: ${err.message}`);
-      return;
-    }
-    const lines = data.split('\n');
-    lines.forEach((line) => {
-      if (line.trim()) {
-        processLogLine(line);
-      }
-    });
-    filePosition = data.length;
-  });
-}
-
-// Função principal que executa o loop de verificação a cada 10 segundos
-function mainLoop() {
-  readNewLines();
-}
+// Variável para armazenar a posição atual no arquivo
+let filePosition = 0;
 
 // Inicializa o monitoramento
 initialize();
-displayRecentLogs();
+
+// Inicia a monitoração do arquivo de log
+monitorLog();
 
 console.log(`Monitorando o arquivo de log: ${MAIL_LOG_PATH}`);
 console.log(`Exibindo os últimos ${MAX_LOGS} logs no console.\n`);
-
-// Inicia o loop de verificação a cada 10 segundos
-setInterval(mainLoop, 10000);
