@@ -63,46 +63,68 @@ function processLogLine(line) {
 
     // Verifica se a mensagem é do sendmail ou sm-mta
     if (parsed.program === 'sendmail' || parsed.program === 'sm-mta') {
-      // Exemplo de mensagem:
-      // 4A44Mbng011203: to=<destinatario@exemplo.com>, ... stat=Sent (<detalhes da mensagem>)
-      // 4A44Mbng011204: to=<destinatario@exemplo.com>, ... stat=Deferred: Connection timed out
-
       const message = parsed.message;
+      const msgData = parseMessage(message);
 
-      // Expressão regular para capturar mensagens de sucesso
-      const sentRegex = /(\S+): to=<(.+?)>,.*?stat=Sent\s*\((.+)\)/i;
-      // Expressão regular para capturar mensagens de falha
-      const failedRegex = /(\S+): to=<(.+?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
+      if (!msgData) {
+        logger.warn(`Linha não reconhecida do sendmail: ${line}`);
+        return;
+      }
 
-      let match = message.match(sentRegex);
-      if (match) {
-        const [_, messageId, to, response] = match;
-        const logMessage = `SUCESSO | ID: ${messageId} | Para: ${to} | Resposta: ${response}`;
+      const { messageId, to, stat, dsn } = msgData;
+      if (!messageId || !to || !stat) {
+        logger.warn(`Linha incompleta do sendmail: ${line}`);
+        return;
+      }
+
+      const recipient = to.replace(/^<|>$/g, ''); // Remove os sinais de menor e maior
+
+      if (stat.trim().toLowerCase().startsWith('sent')) {
+        // Mensagem enviada com sucesso
+        const responseMatch = stat.match(/Sent\s*(?:\((.*)\))?/i);
+        const response = responseMatch ? responseMatch[1] || '' : '';
+        const logMessage = `SUCESSO | ID: ${messageId} | Para: ${recipient} | Resposta: ${response} | DSN: ${dsn || 'N/A'}`;
         logger.info(logMessage);
         addRecentLog(logMessage);
-        displayRecentLogs();
-        return;
-      }
-
-      match = message.match(failedRegex);
-      if (match) {
-        const [_, messageId, to, status, error] = match;
-        const logMessage = `FALHA | ID: ${messageId} | Para: ${to} | Status: ${status} | Erro: ${error}`;
+      } else {
+        // Mensagem com falha
+        const logMessage = `FALHA | ID: ${messageId} | Para: ${recipient} | Status: ${stat.trim()} | DSN: ${dsn || 'N/A'}`;
         logger.error(logMessage);
         addRecentLog(logMessage);
-        displayRecentLogs();
-        return;
       }
 
-      // Se a linha não corresponder a nenhum padrão conhecido
-      logger.warn(`Linha não reconhecida do sendmail: ${line}`);
+      displayRecentLogs();
       return;
     }
-
     // Se a mensagem não for do sendmail ou sm-mta, ignorar ou processar conforme necessário
   } catch (err) {
     logger.error(`Erro ao processar a linha: ${err.message} | Linha: ${line}`);
   }
+}
+
+// Função para analisar a mensagem em pares chave=valor
+function parseMessage(message) {
+  const result = {};
+  const colonIndex = message.indexOf(':');
+  if (colonIndex === -1) {
+    return null;
+  }
+  result.messageId = message.substring(0, colonIndex).trim();
+  const rest = message.substring(colonIndex + 1).trim();
+  const parts = rest.split(/,\s*/);
+  for (const part of parts) {
+    const equalIndex = part.indexOf('=');
+    if (equalIndex !== -1) {
+      const key = part.substring(0, equalIndex).trim();
+      const value = part.substring(equalIndex + 1).trim();
+      result[key] = value;
+    } else {
+      // Tratamento para partes sem sinal de igual
+      const [key, ...valueParts] = part.trim().split(/\s+/);
+      result[key] = valueParts.join(' ');
+    }
+  }
+  return result;
 }
 
 // Caminho para o arquivo mail.log (ajuste conforme necessário)
