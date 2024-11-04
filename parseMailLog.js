@@ -1,5 +1,3 @@
-// parseMailLog.js
-
 const fs = require('fs');
 const path = require('path');
 const chokidar = require('chokidar');
@@ -53,14 +51,14 @@ function displayRecentLogs() {
 
 // Função para processar cada linha do mail.log
 function processLogLine(line) {
-  // Exemplo de linha de sucesso do Postfix:
-  // Sep 10 12:34:56 server postfix/smtp[12345]: ABCDEF12345: to=<destinatario@exemplo.com>, relay=mail.exemplo.com[1.2.3.4]:25, delay=2.3, delays=0.1/0.1/1.2/1.9, dsn=2.0.0, status=sent (250 OK)
-  
-  // Exemplo de linha de falha do Postfix:
-  // Sep 10 12:35:01 server postfix/smtp[12346]: ABCDEF12346: to=<destinatario@exemplo.com>, relay=mail.exemplo.com[1.2.3.4]:25, delay=2.4, delays=0.1/0.1/1.2/1.9, dsn=4.4.1, status=deferred (connect to mail.exemplo.com[1.2.3.4]:25: Connection timed out)
+  // Exemplo de linha de sucesso do Sendmail:
+  // Nov  4 04:22:39 localhost sm-mta[11205]: 4A44Mbng011203: to=<destinatario@exemplo.com>, ... stat=Sent (<detalhes da mensagem>)
 
-  const sentRegex = /postfix\/smtp\[\d+\]: (\w+): to=<(.+?)>, .*status=sent .*?\((.+)\)/i;
-  const failedRegex = /postfix\/smtp\[\d+\]: (\w+): to=<(.+?)>, .*status=(deferred|bounced) .*?\((.+)\)/i;
+  // Exemplo de linha de falha do Sendmail:
+  // Nov  4 04:25:00 localhost sm-mta[11206]: 4A44Mbng011204: to=<destinatario@exemplo.com>, ... stat=Deferred: Connection timed out
+
+  const sentRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.*?)>,.*?stat=Sent\s*\((.+)\)/i;
+  const failedRegex = /(?:sendmail|sm-mta)\[\d+\]: (\S+): to=<(.*?)>,.*?stat=(Deferred|Bounced|Rejected|Error):?\s*(.+)/i;
 
   let match = line.match(sentRegex);
   if (match) {
@@ -105,6 +103,10 @@ const watcher = chokidar.watch(MAIL_LOG_PATH, {
   persistent: true,
   usePolling: true,
   interval: 1000,
+  awaitWriteFinish: {
+    stabilityThreshold: 500,
+    pollInterval: 100
+  }
 });
 
 // Armazena a posição atual no arquivo para ler novas linhas apenas
