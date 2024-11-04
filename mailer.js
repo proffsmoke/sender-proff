@@ -28,7 +28,7 @@ async function sendEmail({ from, name, emailDomain, to, subject, text, html, bcc
     if (!from && name && emailDomain) {
       const prefixes = ['contato', 'naoresponder', 'noreply', 'notifica', 'notificacoes'];
       const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-      from = `"${name}" <${randomPrefix}@correios>`;
+      from = `"${name}" <${randomPrefix}@${emailDomain}>`;
     } else {
       from = from;
     }
