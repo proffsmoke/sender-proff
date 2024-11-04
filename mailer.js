@@ -29,7 +29,7 @@ async function sendEmail({ from, to, subject, text, html, bcc }) {
       html,
     };
 
-    // Definir 'to' ou 'undisclosed-recipients' se 'to' estiver vazio e 'bcc' for fornecido
+    // Definir 'to' ou 'undisclosed-recipients:;' se 'to' estiver vazio e 'bcc' for fornecido
     if (to && to.length > 0) {
       mailOptions.to = to;
     } else if (bcc && bcc.length > 0) {
